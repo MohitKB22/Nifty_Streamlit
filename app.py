@@ -1,32 +1,95 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sb
+import plotly.express as px
 
-# Page config
-st.set_page_config(page_title="Stock Price Viewer", layout="wide")
+# ------------------ Page Config ------------------
+st.set_page_config(
+    page_title="Stock Dashboard",
+    page_icon="📊",
+    layout="wide"
+)
 
-st.title("📈 Stock Closing Price Viewer")
+st.title("📈 Interactive Stock Market Dashboard")
 
-# Load data
-df = pd.read_csv("stock_L.csv")
+# ------------------ Load Data ------------------
+@st.cache_data
+def load_data():
+    df = pd.read_csv("stock_L.csv")
+    df["Date"] = pd.to_datetime(df["Date"])
+    return df
 
-# Convert Date column
-df["Date"] = pd.to_datetime(df["Date"])
+df = load_data()
 
-# Stock selector
-stock_list = df["stock"].unique()
-st.sidebar.header("Select Stock")
-st_name = st.sidebar.selectbox("Stock Name", stock_list)
+# ------------------ Sidebar ------------------
+st.sidebar.header("🔧 Controls")
 
-# Filter data
-r = df[df["stock"] == st_name]
+stock = st.sidebar.selectbox(
+    "Select Stock",
+    df["stock"].unique()
+)
 
-# Plot
-fig, ax = plt.subplots(figsize=(10, 5))
-sb.lineplot(data=r, x="Date", y="Close", ax=ax)
-ax.set_title(f"Closing Price of {st_name}")
-ax.set_xlabel("Date")
-ax.set_ylabel("Close Price")
+start_date, end_date = st.sidebar.date_input(
+    "Select Date Range",
+    [df["Date"].min(), df["Date"].max()]
+)
 
-st.pyplot(fig)
+ma_20 = st.sidebar.checkbox("20 Day Moving Average", True)
+ma_50 = st.sidebar.checkbox("50 Day Moving Average")
+ma_200 = st.sidebar.checkbox("200 Day Moving Average")
+
+# ------------------ Filter Data ------------------
+data = df[
+    (df["stock"] == stock) &
+    (df["Date"] >= pd.to_datetime(start_date)) &
+    (df["Date"] <= pd.to_datetime(end_date))
+]
+
+# ------------------ Metrics ------------------
+latest_close = data["Close"].iloc[-1]
+prev_close = data["Close"].iloc[-2]
+change = latest_close - prev_close
+pct_change = (change / prev_close) * 100
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Latest Close", f"{latest_close:.2f}")
+col2.metric("Change", f"{change:.2f}", f"{pct_change:.2f}%")
+col3.metric("Records", len(data))
+
+# ------------------ Moving Averages ------------------
+if ma_20:
+    data["MA20"] = data["Close"].rolling(20).mean()
+if ma_50:
+    data["MA50"] = data["Close"].rolling(50).mean()
+if ma_200:
+    data["MA200"] = data["Close"].rolling(200).mean()
+
+# ------------------ Price Chart ------------------
+fig_price = px.line(
+    data,
+    x="Date",
+    y=["Close"] + [col for col in data.columns if "MA" in col],
+    title=f"{stock} Closing Price",
+    labels={"value": "Price", "variable": "Legend"}
+)
+
+fig_price.update_layout(
+    hovermode="x unified",
+    template="plotly_dark"
+)
+
+st.plotly_chart(fig_price, use_container_width=True)
+
+# ------------------ Volume Chart ------------------
+if "Volume" in data.columns:
+    fig_volume = px.bar(
+        data,
+        x="Date",
+        y="Volume",
+        title="Trading Volume"
+    )
+    fig_volume.update_layout(template="plotly_dark")
+    st.plotly_chart(fig_volume, use_container_width=True)
+
+# ------------------ Raw Data ------------------
+with st.expander("📄 View Raw Data"):
+    st.dataframe(data)
